@@ -1,0 +1,95 @@
+@startuml Order Processing Saga - Delivery Request Failure
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+title Saga-хореография оформления заказа - Ошибка создания заявки на доставку
+
+actor "Покупатель" as Customer
+participant "Order Service" as Order
+participant "Event Bus" as EventBus
+participant "Inventory Service" as Inventory
+participant "Payment Service" as Payment
+participant "Payment Gateway" as PaymentGW
+participant "Delivery Service" as Delivery
+participant "External Delivery" as ExtDelivery
+participant "Notification Service" as Notification
+participant "Order History Service" as History
+
+Customer -> Order: Оформить заказ
+activate Order
+Order -> Order: Создать заказ\n(статус: CREATED)
+Order -> EventBus: Publish: OrderCreated
+deactivate Order
+
+EventBus -> Inventory: OrderCreated
+activate Inventory
+Inventory -> Inventory: Проверить наличие товаров
+Inventory -> Inventory: Зарезервировать товары
+Inventory -> EventBus: Publish: InventoryReserved
+deactivate Inventory
+
+EventBus -> Payment: InventoryReserved
+activate Payment
+Payment -> PaymentGW: Запрос на оплату
+activate PaymentGW
+PaymentGW --> Payment: Оплата успешна
+deactivate PaymentGW
+Payment -> Payment: Сохранить транзакцию
+Payment -> EventBus: Publish: PaymentSucceeded
+deactivate Payment
+
+EventBus -> Delivery: PaymentSucceeded
+activate Delivery
+Delivery -> ExtDelivery: Создать заявку на доставку
+activate ExtDelivery
+ExtDelivery --> Delivery: Ошибка создания заявки\n(недоступная зона доставки)
+deactivate ExtDelivery
+Delivery -> EventBus: Publish: DeliveryRequestFailed
+note right
+  Причина: недоступная зона,
+  неверный адрес,
+  служба недоступна
+end note
+deactivate Delivery
+
+EventBus -> Payment: DeliveryRequestFailed
+activate Payment
+Payment -> PaymentGW: Запрос на возврат средств
+activate PaymentGW
+PaymentGW --> Payment: Возврат выполнен
+deactivate PaymentGW
+Payment -> Payment: Сохранить транзакцию возврата
+Payment -> EventBus: Publish: PaymentRefunded
+deactivate Payment
+
+EventBus -> Inventory: DeliveryRequestFailed
+activate Inventory
+Inventory -> Inventory: Освободить зарезервированные\nтовары
+Inventory -> EventBus: Publish: InventoryReleased
+deactivate Inventory
+
+EventBus -> Order: DeliveryRequestFailed
+activate Order
+Order -> Order: Отменить заказ\n(статус: CANCELLED)
+Order -> EventBus: Publish: OrderCancelled
+deactivate Order
+
+EventBus -> History: OrderCreated,\nInventoryReserved,\nPaymentSucceeded,\nDeliveryRequestFailed,\nPaymentRefunded,\nInventoryReleased,\nOrderCancelled
+activate History
+History -> History: Обновить историю заказа
+History -> EventBus: Publish: OrderStatusUpdated\n(статус: CANCELLED)
+deactivate History
+
+EventBus -> Notification: OrderCancelled,\nPaymentRefunded
+activate Notification
+Notification ->> Customer: Отправить уведомление\n(заказ отменен:\nошибка доставки,\nсредства возвращены)
+Notification -> EventBus: Publish: CustomerNotificationSent
+deactivate Notification
+
+Customer -> Order: Проверить статус заказа
+activate Order
+Order --> Customer: Статус: CANCELLED\nПричина: ошибка доставки\nСредства возвращены
+deactivate Order
+
+@enduml

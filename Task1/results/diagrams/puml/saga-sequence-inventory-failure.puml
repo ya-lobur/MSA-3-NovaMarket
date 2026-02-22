@@ -1,0 +1,55 @@
+@startuml Order Processing Saga - Inventory Reservation Failure
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+title Saga-хореография оформления заказа - Ошибка резервирования товаров
+
+actor "Покупатель" as Customer
+participant "Order Service" as Order
+participant "Event Bus" as EventBus
+participant "Inventory Service" as Inventory
+participant "Notification Service" as Notification
+participant "Order History Service" as History
+
+Customer -> Order: Оформить заказ
+activate Order
+Order -> Order: Создать заказ\n(статус: CREATED)
+Order -> EventBus: Publish: OrderCreated
+deactivate Order
+
+EventBus -> Inventory: OrderCreated
+activate Inventory
+Inventory -> Inventory: Проверить наличие товаров
+Inventory -> Inventory: Недостаточно товаров\nна складе
+Inventory -> EventBus: Publish: InventoryReservationFailed
+note right
+  Причина: недостаточно товара
+  или товар не найден
+end note
+deactivate Inventory
+
+EventBus -> Order: InventoryReservationFailed
+activate Order
+Order -> Order: Отменить заказ\n(статус: CANCELLED)
+Order -> EventBus: Publish: OrderCancelled
+deactivate Order
+
+EventBus -> History: OrderCreated,\nInventoryReservationFailed,\nOrderCancelled
+activate History
+History -> History: Обновить историю заказа
+History -> EventBus: Publish: OrderStatusUpdated\n(статус: CANCELLED)
+deactivate History
+
+EventBus -> Notification: OrderCancelled
+activate Notification
+Notification ->> Customer: Отправить уведомление\n(заказ отменен:\nнедостаточно товара)
+Notification -> EventBus: Publish: CustomerNotificationSent
+deactivate Notification
+
+Customer -> Order: Проверить статус заказа
+activate Order
+Order --> Customer: Статус: CANCELLED\nПричина: товар отсутствует
+deactivate Order
+
+@enduml
