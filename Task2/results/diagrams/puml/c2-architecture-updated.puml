@@ -1,0 +1,85 @@
+@startuml c2-architecture-updated
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Container Diagram (C2) - NovaMarket with Order History Feature
+
+Person(customer, "Customer", "Customer placing orders")
+Person(seller, "Seller", "Seller receiving order notifications")
+
+System_Boundary(novamarket, "NovaMarket Platform") {
+    Container(mobile, "Mobile App", "iOS/Android", "Mobile application for customers")
+    Container(api_gateway, "API Gateway", "NGINX", "Request routing, authentication, rate limiting")
+
+    Container(catalog_service, "Catalog Service", "Microservice", "Manages product catalog, prices, reviews, filtering")
+    Container(cart_service, "Cart Service", "Microservice", "Manages shopping cart operations")
+    Container(order_service, "Order Service", "Microservice", "Orchestrates order creation and processing (Command)")
+    Container(inventory_service, "Inventory Service", "Microservice", "Manages stock availability and reservations")
+    Container(payment_service, "Payment Service", "Microservice", "Processes payments and card binding")
+    Container(delivery_service, "Delivery Service", "Microservice", "Manages delivery requests")
+    Container(notification_service, "Notification Service", "Microservice", "Sends notifications to customers and sellers")
+
+    Container(order_history_service, "Order History Service", "Microservice", "CQRS Read Model: materialized view of order history with aggregated data")
+
+    ContainerDb(catalog_db, "Catalog DB", "PostgreSQL", "Products, prices, reviews")
+    ContainerDb(cart_db, "Cart DB", "Redis", "Shopping carts")
+    ContainerDb(order_db, "Order DB", "PostgreSQL", "Orders, statuses")
+    ContainerDb(inventory_db, "Inventory DB", "PostgreSQL", "Stock, reservations")
+    ContainerDb(payment_db, "Payment DB", "PostgreSQL", "Payments, cards")
+    ContainerDb(delivery_db, "Delivery DB", "PostgreSQL", "Delivery requests")
+    ContainerDb(order_history_db, "Order History DB", "PostgreSQL", "Denormalized order history data")
+
+    Container(event_bus, "Event Bus", "Kafka/RabbitMQ", "Asynchronous event bus for EDA")
+}
+
+System_Ext(payment_gateway, "Payment Gateway", "External payment gateway")
+System_Ext(external_delivery, "External Delivery Service", "External logistics provider")
+
+' Client connections
+Rel(customer, mobile, "Uses")
+Rel(mobile, api_gateway, "HTTPS/REST API")
+
+' API Gateway to services
+Rel(api_gateway, catalog_service, "Sync call", "HTTPS/REST")
+Rel(api_gateway, cart_service, "Sync call", "HTTPS/REST")
+Rel(api_gateway, order_service, "Sync call", "HTTPS/REST")
+Rel(api_gateway, order_history_service, "Sync call for reading history", "HTTPS/REST")
+
+' Services to databases
+Rel(catalog_service, catalog_db, "Reads/Writes", "SQL")
+Rel(cart_service, cart_db, "Reads/Writes", "Redis Protocol")
+Rel(order_service, order_db, "Reads/Writes", "SQL")
+Rel(inventory_service, inventory_db, "Reads/Writes", "SQL")
+Rel(payment_service, payment_db, "Reads/Writes", "SQL")
+Rel(delivery_service, delivery_db, "Reads/Writes", "SQL")
+Rel(order_history_service, order_history_db, "Reads", "SQL")
+
+' Event-driven interactions - Publishing events
+Rel(order_service, event_bus, "Publishes: OrderCreated, OrderCancelled, OrderCompleted")
+Rel(inventory_service, event_bus, "Publishes: ItemsReserved, ReservationFailed, ItemsReleased")
+Rel(payment_service, event_bus, "Publishes: PaymentSucceeded, PaymentFailed, RefundCompleted")
+Rel(delivery_service, event_bus, "Publishes: DeliveryCreated, DeliveryFailed, DeliveryInProgress, DeliveryCompleted")
+Rel(catalog_service, event_bus, "Publishes: ProductUpdated, PriceChanged, ReviewAdded")
+
+' Event-driven interactions - Consuming events (SAGA)
+Rel(event_bus, inventory_service, "Subscribes to: OrderCreated")
+Rel(event_bus, payment_service, "Subscribes to: ItemsReserved")
+Rel(event_bus, delivery_service, "Subscribes to: PaymentSucceeded")
+Rel(event_bus, notification_service, "Subscribes to: OrderCreated, PaymentSucceeded, DeliveryCompleted, OrderCancelled, PaymentFailed, DeliveryFailed")
+Rel(event_bus, order_service, "Subscribes to: ItemsReserved, ReservationFailed, PaymentSucceeded, PaymentFailed, DeliveryCreated, DeliveryFailed, RefundCompleted")
+
+' CQRS - Order History Service subscribes to all relevant events
+Rel(event_bus, order_history_service, "Subscribes to all events for Read Model update: OrderCreated, ItemsReserved, PaymentSucceeded, DeliveryCreated, DeliveryCompleted, OrderCancelled, ProductUpdated, etc.")
+
+' External integrations
+Rel(payment_service, payment_gateway, "Process payments", "HTTPS/REST, Circuit Breaker")
+Rel(delivery_service, external_delivery, "Create delivery requests", "HTTPS/REST, Circuit Breaker")
+
+' Notifications
+Rel(notification_service, customer, "Sends notifications", "Push/Email/SMS")
+Rel(notification_service, seller, "Sends notifications", "Email/SMS")
+
+SHOW_LEGEND()
+
+@enduml

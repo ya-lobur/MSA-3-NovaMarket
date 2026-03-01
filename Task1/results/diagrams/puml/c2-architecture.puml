@@ -1,0 +1,87 @@
+@startuml NovaMarket C2 Architecture
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title NovaMarket Event-Driven Architecture - Container Diagram (C2)
+
+Person(customer, "Customer", "End user who browses and purchases products")
+Person(seller, "Seller", "Vendor who provides products and receives order notifications")
+System_Ext(payment_gateway, "Payment Gateway", "External payment processing system")
+System_Ext(delivery_service, "Delivery Service", "External logistics provider")
+
+System_Boundary(novamarket, "NovaMarket Platform") {
+    Container(mobile_app, "Mobile App", "iOS/Android", "User interface for browsing and ordering")
+    Container(api_gateway, "API Gateway", "NGINX", "Routes requests, handles authentication")
+
+    Container(catalog_service, "Catalog Service", "Microservice", "Manages product catalog, pricing, reviews, filters")
+    Container(cart_service, "Cart Service", "Microservice", "Manages shopping cart operations")
+    Container(order_service, "Order Service", "Microservice", "Orchestrates order processing workflow")
+    Container(inventory_service, "Inventory Service", "Microservice", "Manages stock availability and reservations")
+    Container(payment_service, "Payment Service", "Microservice", "Handles payment processing and card binding")
+    Container(delivery_service_internal, "Delivery Service", "Microservice", "Manages delivery requests and tracking")
+    Container(notification_service, "Notification Service", "Microservice", "Sends notifications to customers and sellers")
+    Container(order_history_service, "Order History Service", "Microservice", "Stores and provides order history and status")
+
+    ContainerQueue(event_bus, "Event Bus", "Kafka/RabbitMQ", "Asynchronous event messaging backbone")
+
+    ContainerDb(catalog_db, "Catalog DB", "PostgreSQL", "Product data, reviews, ratings")
+    ContainerDb(cart_db, "Cart DB", "Redis", "Active shopping carts")
+    ContainerDb(order_db, "Order DB", "PostgreSQL", "Order details")
+    ContainerDb(inventory_db, "Inventory DB", "PostgreSQL", "Stock levels, reservations")
+    ContainerDb(payment_db, "Payment DB", "PostgreSQL", "Payment transactions, card bindings")
+    ContainerDb(delivery_db, "Delivery DB", "PostgreSQL", "Delivery requests, tracking")
+    ContainerDb(order_history_db, "Order History DB", "PostgreSQL", "Historical order data")
+}
+
+' User interactions
+Rel(customer, mobile_app, "Browses products, places orders", "HTTPS")
+Rel(seller, mobile_app, "Views orders, manages products", "HTTPS")
+Rel(mobile_app, api_gateway, "API calls", "HTTPS/REST")
+
+' API Gateway to services
+Rel(api_gateway, catalog_service, "Product queries", "HTTP/REST")
+Rel(api_gateway, cart_service, "Cart operations", "HTTP/REST")
+Rel(api_gateway, order_service, "Order creation", "HTTP/REST")
+Rel(api_gateway, order_history_service, "Order status queries", "HTTP/REST")
+
+' Service to database
+Rel(catalog_service, catalog_db, "Reads/Writes", "SQL")
+Rel(cart_service, cart_db, "Reads/Writes", "Redis Protocol")
+Rel(order_service, order_db, "Reads/Writes", "SQL")
+Rel(inventory_service, inventory_db, "Reads/Writes", "SQL")
+Rel(payment_service, payment_db, "Reads/Writes", "SQL")
+Rel(delivery_service_internal, delivery_db, "Reads/Writes", "SQL")
+Rel(order_history_service, order_history_db, "Reads/Writes", "SQL")
+
+' Event-driven communication
+Rel(order_service, event_bus, "Publishes: OrderCreated", "Async")
+Rel(event_bus, inventory_service, "Subscribes: OrderCreated", "Async")
+
+Rel(inventory_service, event_bus, "Publishes: InventoryReserved, InventoryReservationFailed", "Async")
+Rel(event_bus, payment_service, "Subscribes: InventoryReserved", "Async")
+Rel(event_bus, order_service, "Subscribes: InventoryReservationFailed", "Async")
+
+Rel(payment_service, event_bus, "Publishes: PaymentSucceeded, PaymentFailed", "Async")
+Rel(payment_service, payment_gateway, "Process payment", "HTTPS/API")
+Rel(event_bus, delivery_service_internal, "Subscribes: PaymentSucceeded", "Async")
+Rel(event_bus, inventory_service, "Subscribes: PaymentFailed", "Async")
+
+Rel(delivery_service_internal, event_bus, "Publishes: DeliveryRequestCreated, DeliveryRequestFailed", "Async")
+Rel(delivery_service_internal, delivery_service, "Create delivery request", "HTTPS/API")
+Rel(event_bus, notification_service, "Subscribes: DeliveryRequestCreated", "Async")
+Rel(event_bus, payment_service, "Subscribes: DeliveryRequestFailed", "Async")
+
+Rel(notification_service, event_bus, "Publishes: NotificationSent", "Async")
+Rel(notification_service, customer, "Sends notifications", "Push/Email/SMS")
+Rel(notification_service, seller, "Sends notifications", "Push/Email/SMS")
+
+' Order history tracking
+Rel(event_bus, order_history_service, "Subscribes: All order events", "Async")
+Rel(order_history_service, event_bus, "Publishes: OrderStatusUpdated", "Async")
+
+' Catalog updates
+Rel(catalog_service, event_bus, "Publishes: ProductPriceChanged, ProductAvailabilityChanged", "Async")
+Rel(event_bus, cart_service, "Subscribes: ProductPriceChanged", "Async")
+
+@enduml

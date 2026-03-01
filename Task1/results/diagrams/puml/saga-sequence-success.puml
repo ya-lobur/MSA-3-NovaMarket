@@ -1,0 +1,82 @@
+@startuml Order Processing Saga - Success Scenario
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+title Saga-хореография оформления заказа - Успешный сценарий
+
+actor "Покупатель" as Customer
+participant "Order Service" as Order
+participant "Event Bus" as EventBus
+participant "Inventory Service" as Inventory
+participant "Payment Service" as Payment
+participant "Payment Gateway" as PaymentGW
+participant "Delivery Service" as Delivery
+participant "External Delivery" as ExtDelivery
+participant "Notification Service" as Notification
+participant "Order History Service" as History
+
+Customer -> Order: Оформить заказ
+activate Order
+Order -> Order: Создать заказ\n(статус: CREATED)
+Order -> EventBus: Publish: OrderCreated
+deactivate Order
+
+EventBus -> Inventory: OrderCreated
+activate Inventory
+Inventory -> Inventory: Проверить наличие товаров
+Inventory -> Inventory: Зарезервировать товары
+Inventory -> EventBus: Publish: InventoryReserved
+deactivate Inventory
+
+EventBus -> Payment: InventoryReserved
+activate Payment
+Payment -> PaymentGW: Запрос на оплату
+activate PaymentGW
+PaymentGW --> Payment: Оплата успешна
+deactivate PaymentGW
+Payment -> Payment: Сохранить транзакцию
+Payment -> EventBus: Publish: PaymentSucceeded
+deactivate Payment
+
+EventBus -> Delivery: PaymentSucceeded
+activate Delivery
+Delivery -> ExtDelivery: Создать заявку на доставку
+activate ExtDelivery
+ExtDelivery --> Delivery: Заявка создана, трек-номер
+deactivate ExtDelivery
+Delivery -> Delivery: Сохранить данные доставки
+Delivery -> EventBus: Publish: DeliveryRequestCreated
+deactivate Delivery
+
+EventBus -> Notification: DeliveryRequestCreated
+activate Notification
+Notification -> Notification: Подготовить уведомления
+Notification ->> Customer: Отправить уведомление\n(заказ оформлен)
+Notification -> EventBus: Publish: CustomerNotificationSent
+deactivate Notification
+
+EventBus -> Notification: DeliveryRequestCreated
+activate Notification
+Notification ->> Order: Отправить уведомление\n(новый заказ)
+note right: Продавцу
+Notification -> EventBus: Publish: SellerNotificationSent
+deactivate Notification
+
+EventBus -> History: OrderCreated,\nInventoryReserved,\nPaymentSucceeded,\nDeliveryRequestCreated
+activate History
+History -> History: Обновить историю заказа
+History -> EventBus: Publish: OrderStatusUpdated\n(статус: IN_DELIVERY)
+deactivate History
+
+EventBus -> Order: OrderStatusUpdated
+activate Order
+Order -> Order: Обновить статус заказа
+deactivate Order
+
+Customer -> Order: Проверить статус заказа
+activate Order
+Order --> Customer: Статус: IN_DELIVERY\nТрек-номер доступен
+deactivate Order
+
+@enduml
